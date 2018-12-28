@@ -48,6 +48,7 @@ void spkr_exit(void) {
 	iounmap(0x3f20C014);
 
 	printk(KERN_INFO "spkr exit\n");
+	
 }
 
 void spkr_set_frequency(unsigned int frequency) {

@@ -17,6 +17,7 @@ extern void spkr_set_frequency(unsigned int frequency);
 extern void spkr_on(void);
 extern void spkr_off(void);
 
+
 /*static int minor = 0;
 static int n_aperturas_writemode = 0;
 static dev_t dev;
