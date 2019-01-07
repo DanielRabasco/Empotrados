@@ -2,9 +2,9 @@
 #include <linux/module.h>
 #include <linux/version.h>
 MODULE_LICENSE("Dual BSD/GPL");
-/*
+
 void spkr_init(void) {
-	void __iomem *regs_div = ioremap(0x3F1010A4, 4);
+	/*void __iomem *regs_div = ioremap(0x3F1010A4, 4);
 	void __iomem *regs_ctl = ioremap(0x3F1010A0, 4);
 
 	void __iomem *regs_gpio = ioremap(0x3f200100, 4);
@@ -34,18 +34,18 @@ void spkr_init(void) {
 	// Reseting bit 7 and writing 1 in it(in the pwm control region)
 	val_pwm_ctl &= ~(0x1 << 7);
 	val_pwm_ctl |= (0x1 << 7);
-	iowrite32(val_pwm_ctl, reg_pwm_ctl);
+	iowrite32(val_pwm_ctl, reg_pwm_ctl);*/
 
 	printk(KERN_INFO "spkr init\n");
 }
 
 void spkr_exit(void) {
-	iounmap(0x3F1010A4);
+	/*iounmap(0x3F1010A4);
 	iounmap(0x3F1010A0);
 	iounmap(0x3f200100);
 	iounmap(0x3f20C000);
 	iounmap(0x3f20C010);
-	iounmap(0x3f20C014);
+	iounmap(0x3f20C014);*/
 
 	printk(KERN_INFO "spkr exit\n");
 	
@@ -58,25 +58,25 @@ void spkr_set_frequency(unsigned int frequency) {
 void spkr_on(void) {
 	
 	// region for the pwm control
-	void __iomem *reg_pwm_ctl = ioremap(0x3f20C000, 4);
+	/*void __iomem *reg_pwm_ctl = ioremap(0x3f20C000, 4);
 	uint32_t val_pwm_ctl = ioread32(reg_pwm_ctl);
 
 	// Reseting bit 0 and writing 1 in it(in the pwm control region) to activate
 	val_pwm_ctl &= ~(0x1 << 0);
 	val_pwm_ctl |= (0x1 << 0);
-	iowrite32(val_pwm_ctl, reg_pwm_ctl);
+	iowrite32(val_pwm_ctl, reg_pwm_ctl);*/
 	printk(KERN_INFO "spkr ON\n");
 }
 void spkr_off(void) {
 	
 	// region for the pwm control
-	void __iomem *reg_pwm_ctl = ioremap(0x3f20C000, 4);
+	/*void __iomem *reg_pwm_ctl = ioremap(0x3f20C000, 4);
 	uint32_t val_pwm_ctl = ioread32(reg_pwm_ctl);
 
 	// Reseting bit 0 and writing 0 in it(in the pwm control region) to deactivate
 	val_pwm_ctl &= ~(0x0 << 0);
 	val_pwm_ctl |= (0x0 << 0);
-	iowrite32(val_pwm_ctl, reg_pwm_ctl);
+	iowrite32(val_pwm_ctl, reg_pwm_ctl);*/
 	printk(KERN_INFO "spkr OFF\n");
 }
-*/
+

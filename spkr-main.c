@@ -42,10 +42,12 @@ volatile int mute_sound;
 // parameters
 module_param(minor, int, S_IRUGO);
 module_param(buffer_length, int, S_IRUGO);
+static int buffer_threshold = PAGE_SIZE;
+module_param(buffer_threshold, int, S_IRUGO);
 
 //structs
 struct info_mydev {
-	struct cdev mydev_cdev;
+    struct cdev mydev_cdev;
 };
 
 struct timer_list timer;
@@ -63,7 +65,6 @@ static int spkr_open(struct inode *inode, struct file *filp) {
 	if ((filp->f_mode & FMODE_WRITE) != 0){
 		if (n_aperturas_writemode == 0){
 			n_aperturas_writemode++;
-			printk("WRITE");
 		}else{
 			return -EBUSY;
 		}
@@ -84,10 +85,14 @@ static int spkr_release(struct inode *inode, struct file *filp) {
 
 static ssize_t spkr_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
 
+    
+    printk(KERN_ALERT "Funcion de ESCRITURA");
+
     unsigned int count_copy = 0;
     unsigned int copied;
 
     // Bloqueo del proceso
+    printk(KERN_ALERT "Blockingmutex");
     if (mutex_lock_interruptible(&mutex)){
         return -ERESTARTSYS;
     }
@@ -96,28 +101,27 @@ static ssize_t spkr_write(struct file *filp, const char __user *buf, size_t coun
 
         timer.data = count - count_copy;
 
-        printk(KERN_ALERT "ANTES DEL BLOQUEO");
+        printk(KERN_ALERT "Blocked list");;
         if(wait_event_interruptible(info.lista_bloq, kfifo_avail(&fifo) > 0) != 0){
             return -ERESTARTSYS;
         }
+	printk(KERN_ALERT "Unblocked list");
 
         if (kfifo_from_user(&fifo, buf+count_copy, count, &copied) != -EFAULT) {
             count_copy += copied;
 
             if(!dreaming && (kfifo_len(&fifo) >= 4)){
+		printk(KERN_ALERT "Playing by writting operation");
                 spkr_play();
             }
-
+	    printk(KERN_ALERT "Unblockingmutex");
             mutex_unlock(&mutex);
-            return count_copy;
         }
         else{
             return -EFAULT;
         }
     }
-
-	printk(KERN_ALERT "Funcion de escritura");
-	return count;
+    return count;
 }
 
 static struct file_operations fops = {
@@ -128,26 +132,31 @@ static struct file_operations fops = {
 };
 
 int speaker_init(void){
-	alloc_chrdev_region(&dev, minor, 1, "spkr");
-	cdev_init(&cdev, &fops);
-	cdev_add(&cdev, dev, 1);
-	clase = class_create(THIS_MODULE, "speaker");
-	device_create(clase, NULL, dev, NULL, "intspkr");
-	printk(KERN_ALERT "MAJOR:%i\n",MAJOR(dev));
-	printk(KERN_ALERT "MINOR:%i\n",MINOR(dev));
+    alloc_chrdev_region(&dev, minor, 1, "spkr");
+    cdev_init(&cdev, &fops);
+    cdev_add(&cdev, dev, 1);
+    clase = class_create(THIS_MODULE, "speaker");
+    device_create(clase, NULL, dev, NULL, "intspkr");
+    printk(KERN_ALERT "MAJOR:%i\n",MAJOR(dev));
+    printk(KERN_ALERT "MINOR:%i\n",MINOR(dev));
 
     // Step 4 of the project initialization
-	init_timer(&timer);
-	timer.function = temp_treatment;
+    init_timer(&timer);
+    timer.function = temp_treatment;
     timer.data = 0;
-	init_waitqueue_head(&info.lista_bloq);
-	mute_sound = 0;
+    init_waitqueue_head(&info.lista_bloq);
+    mute_sound = 0;
 
-	buffer_length = upper_power_of_two(buffer_length);
+    buffer_length = upper_power_of_two(buffer_length);
     if(kfifo_alloc(&fifo, buffer_length, GFP_USER)){
         return -ENOMEM;
     }
-	return 0;
+    
+    if(buffer_threshold > buffer_length) {
+	buffer_threshold = buffer_length;
+    }
+    
+    return 0;
 }
 
 void speaker_exit(void){
@@ -156,6 +165,9 @@ void speaker_exit(void){
 	device_destroy(clase, dev);
 	class_destroy(clase);
 	kfifo_free(&fifo);
+	del_timer_sync(&timer);
+	spkr_off();
+	printk(KERN_ALERT "Exiting");
 }
 
 unsigned long upper_power_of_two(unsigned long v) {
@@ -204,6 +216,7 @@ static void spkr_play(void) {
 static void temp_treatment(unsigned long d) {
     // If we have sounds to play
     if(kfifo_len(&fifo) >= 4){
+	printk(KERN_ALERT "Playing by temp_treatment");
         spkr_play();
     }
     // If not disable the spkr
@@ -214,7 +227,8 @@ static void temp_treatment(unsigned long d) {
 
     // desbloqueará a un proceso escritor si el hueco en la cola o bien es suficiente para
     // que el proceso pueda completar su petición, o bien es mayor o igual que el umbral recibido como parámetro
-    if(kfifo_is_empty(&fifo) || kfifo_avail(&fifo) >= minimum(buffer_threshold, bytes_left)){
+    if(kfifo_is_empty(&fifo) || kfifo_avail(&fifo) >= minimum(buffer_threshold, d)) {
+	printk(KERN_ALERT "Temp UNBLOCKING");
         wake_up_interruptible(&info.lista_bloq);
     }
 }
