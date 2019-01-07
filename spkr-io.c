@@ -2,7 +2,7 @@
 #include <linux/module.h>
 #include <linux/version.h>
 MODULE_LICENSE("Dual BSD/GPL");
-
+/*
 void spkr_init(void) {
 	void __iomem *regs_div = ioremap(0x3F1010A4, 4);
 	void __iomem *regs_ctl = ioremap(0x3F1010A0, 4);
@@ -79,3 +79,4 @@ void spkr_off(void) {
 	iowrite32(val_pwm_ctl, reg_pwm_ctl);
 	printk(KERN_INFO "spkr OFF\n");
 }
+*/
