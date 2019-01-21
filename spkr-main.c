@@ -23,7 +23,6 @@ extern void spkr_off(void);
 // functions
 static void spkr_play(void);
 static void temp_treatment(unsigned long d);
-unsigned long rounding_up(unsigned long v);
 static long ejemplo_ioctl(struct file *filp, unsigned int cmd,
                       unsigned long arg);
 
@@ -39,9 +38,9 @@ static int buffer_threshold = PAGE_SIZE;
 static DEFINE_MUTEX(mutex);
 spinlock_t lock;
 bool dreaming;
-volatile int mute_sound;
+int mute;
 
-/*ioctl*/
+// Macros creacion de numero identificador ioctl
 #define SPKR_SET_MUTE_STATE _IOW('9',1,int*)
 #define SPKR_GET_MUTE_STATE _IOR('9',2,int*)
 #define SPKR_RESET _IO('9',3)
@@ -92,6 +91,7 @@ static int spkr_release(struct inode *inode, struct file *filp) {
 	if ((filp->f_mode & FMODE_WRITE) != 0){
 		n_aperturas_writemode--;
 	}
+    
 	printk(KERN_ALERT "Funcion de liberacion");
 	return 0;
 }
@@ -124,10 +124,10 @@ static ssize_t spkr_write(struct file *filp, const char __user *buf, size_t coun
             count_copy += copied;
 
             if(!dreaming && (kfifo_len(&fifo) >= 4)){
-		printk(KERN_ALERT "Playing by writting operation");
+                printk(KERN_ALERT "Playing by writting operation");
                 spkr_play();
             }
-	    printk(KERN_ALERT "Unblockingmutex");
+            printk(KERN_ALERT "Unblockingmutex");
             mutex_unlock(&mutex);
         }
         else{
@@ -147,10 +147,6 @@ static struct file_operations fops = {
 };
 
 int speaker_init(void){
-    printk(KERN_ALERT "ROUND: %lu", rounding_up(1.5));
-    printk(KERN_ALERT "ROUND: %lu", rounding_up(30));
-    printk(KERN_ALERT "ROUND: %lu", rounding_up(64));
-    printk(KERN_ALERT "ROUND: %lu", rounding_up(1000));
     alloc_chrdev_region(&dev, minor, 1, "spkr");
     cdev_init(&cdev, &fops);
     cdev_add(&cdev, dev, 1);
@@ -164,9 +160,30 @@ int speaker_init(void){
     timer.function = temp_treatment;
     timer.data = 0;
     init_waitqueue_head(&info.lista_bloq);
-    mute_sound = 0;
+    mute = 0;
 
-    buffer_length = rounding_up(buffer_length);
+    // Rounding up proccess
+    if (buffer_length < 1) {
+        return 0;
+     }else{
+        buffer_length--; 
+      
+        int cont;
+        cont = 0;
+        while (buffer_length > 1){
+            buffer_length = (int) buffer_length/2;
+            cont++;
+        } 
+      
+        int i;
+        i = 0;
+        buffer_length = 1;
+        while (i < cont + 1){
+            buffer_length = buffer_length*2;
+            i++;
+        }
+    }
+    
     if(kfifo_alloc(&fifo, buffer_length, GFP_USER)){
         return -ENOMEM;
     }
@@ -206,30 +223,6 @@ static int ejemplo_fsync(struct file *filp, int datasync){
 #endif
 
 
-unsigned long rounding_up(unsigned long number) {
-    
-  if (number < 1) return 0;
-  
-  number--; 
-  
-  int cont;
-  cont = 0;
-  while (number > 1){
-    number = (int) number/2;
-    cont++;
-  }
-  
-  int i;
-  i = 0;
-  number = 1;
-  while (i < cont + 1){
-    number = number*2;
-    i++;
-  }
-  
-  return number;
-}
-
 static void spkr_play(void) {
     unsigned char sound_data[4];
     unsigned int elements_copied;
@@ -254,7 +247,9 @@ static void spkr_play(void) {
         spkr_off();
     } else {
         spkr_set_frequency(frequency);
-        if(mute_sound == 0){
+        
+        // Solo reproducimos si no esta muteado
+        if(mute == 0){
             spkr_on();
         }
     }
@@ -264,8 +259,8 @@ static void spkr_play(void) {
 
 static void temp_treatment(unsigned long d) {
     // If we have sounds to play
-    if(kfifo_len(&fifo) >= 4){
-	printk(KERN_ALERT "Playing by temp_treatment");
+    if(kfifo_len(&fifo) > 3){
+        printk(KERN_ALERT "Playing by temp_treatment");
         spkr_play();
     }
     // If not disable the spkr
@@ -278,14 +273,14 @@ static void temp_treatment(unsigned long d) {
     min = 0;
     if (d > buffer_threshold){
 	min = buffer_threshold;
-    }else{
-	min = d;
-    }
+        }else{
+            min = d;
+        }
     
     // desbloqueará a un proceso escritor si el hueco en la cola o bien es suficiente para
     // que el proceso pueda completar su petición, o bien es mayor o igual que el umbral recibido como parámetro
     if(kfifo_is_empty(&fifo) || kfifo_avail(&fifo) >= min) {
-	printk(KERN_ALERT "Temp UNBLOCKING");
+        printk(KERN_ALERT "Temp UNBLOCKING");
         wake_up_interruptible(&info.lista_bloq);
     }
 }
@@ -293,39 +288,34 @@ static void temp_treatment(unsigned long d) {
 static long ejemplo_ioctl(struct file *filp, unsigned int cmd,
                       unsigned long arg)
 {
-  printk(KERN_ALERT "Funcion IOCTL llamada");
-  int* value;
-  int status;
-
-
-  printk(KERN_ALERT "IMPRIMIR CMD: %d",cmd);
-  printk(KERN_ALERT "ORW: %d", SPKR_SET_MUTE_STATE);
-  printk(KERN_ALERT "ORR: %d", SPKR_GET_MUTE_STATE);
-  
-  switch(cmd){
-    case SPKR_GET_MUTE_STATE:
-      printk(KERN_ALERT "Envio mute_state ioctl");
-      put_user(mute_sound, (int*)arg);
-      break;
-    case SPKR_SET_MUTE_STATE:
-      printk(KERN_ALERT "Set mute_state ioctl");
-      value = (int*)arg;
-      get_user(status, value);
-      if(status == 0){
-        mute_sound = 1;
-        spkr_off();
-      }else{
-        mute_sound = 0;
-        spkr_on();
+    int *value;
+    int local;
+        
+    switch(cmd){
+        
+        case SPKR_GET_MUTE_STATE:
+        
+            put_user(mute, (int*)arg);
+            
+            break;
+            
+        case SPKR_SET_MUTE_STATE:
+        
+            value = (int*)arg;
+            get_user(local, value/*&(int*)arg*/);
+            if(local == 0){
+                mute = 1;
+                spkr_off();
+            }else{
+                mute= 0;
+                spkr_on();
+            }
+            
+            break;
+            
+        case SPKR_RESET:
+          break;
       }
-      break;
-    case SPKR_RESET:
-      printk(KERN_ALERT "Clear fifo");
-      spin_lock_bh(&lock);
-      kfifo_reset(&fifo);
-      spin_unlock_bh(&lock);
-      break;
-  }
   return 0;
 }
 
