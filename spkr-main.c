@@ -23,8 +23,9 @@ extern void spkr_off(void);
 // functions
 static void spkr_play(void);
 static void temp_treatment(unsigned long d);
-unsigned int minimum(unsigned int threshold, unsigned int bytes_left);
-unsigned long upper_power_of_two(unsigned long v);
+unsigned long rounding_up(unsigned long v);
+static long ejemplo_ioctl(struct file *filp, unsigned int cmd,
+                      unsigned long arg);
 
 // variables
 static int minor = 0;
@@ -34,15 +35,20 @@ static struct cdev cdev;
 static struct class *clase;
 static struct kfifo fifo;
 static int buffer_length = PAGE_SIZE;
+static int buffer_threshold = PAGE_SIZE;
 static DEFINE_MUTEX(mutex);
 spinlock_t lock;
 bool dreaming;
 volatile int mute_sound;
 
+/*ioctl*/
+#define SPKR_SET_MUTE_STATE _IOW('9',1,int*)
+#define SPKR_GET_MUTE_STATE _IOR('9',2,int*)
+#define SPKR_RESET _IO('9',3)
+
 // parameters
 module_param(minor, int, S_IRUGO);
 module_param(buffer_length, int, S_IRUGO);
-static int buffer_threshold = PAGE_SIZE;
 module_param(buffer_threshold, int, S_IRUGO);
 
 //structs
@@ -57,7 +63,14 @@ struct info_dispo {
   // ...............
 } info;
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3,0,0)
+static int ejemplo_fsync(struct file *filp, loff_t start, loff_t end, int datasync);
+#else
+static int ejemplo_fsync(struct file *filp, int datasync);
+#endif
+
 static int spkr_open(struct inode *inode, struct file *filp) {
+        
 	struct info_mydev *info_dev = container_of(inode->i_cdev, struct info_mydev, mydev_cdev);
 	filp->private_data = info_dev;
 
@@ -105,7 +118,7 @@ static ssize_t spkr_write(struct file *filp, const char __user *buf, size_t coun
         if(wait_event_interruptible(info.lista_bloq, kfifo_avail(&fifo) > 0) != 0){
             return -ERESTARTSYS;
         }
-	printk(KERN_ALERT "Unblocked list");
+        printk(KERN_ALERT "Unblocked list");
 
         if (kfifo_from_user(&fifo, buf+count_copy, count, &copied) != -EFAULT) {
             count_copy += copied;
@@ -128,10 +141,16 @@ static struct file_operations fops = {
   .owner = THIS_MODULE,
   .open = spkr_open,
   .release = spkr_release,
-  .write = spkr_write
+  .write = spkr_write,
+  .fsync = ejemplo_fsync,
+  .unlocked_ioctl =  ejemplo_ioctl
 };
 
 int speaker_init(void){
+    printk(KERN_ALERT "ROUND: %lu", rounding_up(1.5));
+    printk(KERN_ALERT "ROUND: %lu", rounding_up(30));
+    printk(KERN_ALERT "ROUND: %lu", rounding_up(64));
+    printk(KERN_ALERT "ROUND: %lu", rounding_up(1000));
     alloc_chrdev_region(&dev, minor, 1, "spkr");
     cdev_init(&cdev, &fops);
     cdev_add(&cdev, dev, 1);
@@ -147,7 +166,7 @@ int speaker_init(void){
     init_waitqueue_head(&info.lista_bloq);
     mute_sound = 0;
 
-    buffer_length = upper_power_of_two(buffer_length);
+    buffer_length = rounding_up(buffer_length);
     if(kfifo_alloc(&fifo, buffer_length, GFP_USER)){
         return -ENOMEM;
     }
@@ -155,7 +174,10 @@ int speaker_init(void){
     if(buffer_threshold > buffer_length) {
 	buffer_threshold = buffer_length;
     }
-    
+        
+    spkr_init();
+    /*spkr_on();
+    spkr_set_frequency(1047);*/
     return 0;
 }
 
@@ -167,25 +189,52 @@ void speaker_exit(void){
 	kfifo_free(&fifo);
 	del_timer_sync(&timer);
 	spkr_off();
+	spkr_exit();
 	printk(KERN_ALERT "Exiting");
 }
 
-unsigned long upper_power_of_two(unsigned long v) {
-  v--;
-  v |= v >> 1;
-  v |= v >> 2;
-  v |= v >> 4;
-  v |= v >> 8;
-  v |= v >> 16;
-  v++;
-  return v;
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3,0,0)
+static int ejemplo_fsync(struct file *filp, loff_t start, loff_t end, int datasync) {
+    wait_event_interruptible(info.lista_bloq, kfifo_is_empty(&fifo));
+    return 0;
+}
+#else
+static int ejemplo_fsync(struct file *filp, int datasync){
+    wait_event_interruptible(info.lista_bloq, kfifo_is_empty(&fifo));
+    return 0;
+}
+#endif
+
+
+unsigned long rounding_up(unsigned long number) {
+    
+  if (number < 1) return 0;
+  
+  number--; 
+  
+  int cont;
+  cont = 0;
+  while (number > 1){
+    number = (int) number/2;
+    cont++;
+  }
+  
+  int i;
+  i = 0;
+  number = 1;
+  while (i < cont + 1){
+    number = number*2;
+    i++;
+  }
+  
+  return number;
 }
 
 static void spkr_play(void) {
     unsigned char sound_data[4];
-    unsigned int frequency;
-    unsigned int delay;
     unsigned int elements_copied;
+    unsigned int frequency;
+    unsigned int time;
 
     dreaming = true;
     spin_lock_bh(&lock);
@@ -197,9 +246,9 @@ static void spkr_play(void) {
     spin_unlock_bh(&lock);
 
     frequency = (unsigned int) ((sound_data[1] << 8) + sound_data[0]);
-    delay = (unsigned int) ((sound_data[3] << 8) + sound_data[2]);
-    printk(KERN_ALERT "Frecuencia obtenida: %d", frequency);
-    printk(KERN_ALERT "Delay obtenido: %d", delay);
+    printk(KERN_ALERT "Frecuency: %d", frequency);
+    time = (unsigned int) ((sound_data[3] << 8) + sound_data[2]);
+    printk(KERN_ALERT "Time: %d", time);
 
     if(frequency == 0){
         spkr_off();
@@ -208,8 +257,8 @@ static void spkr_play(void) {
         if(mute_sound == 0){
             spkr_on();
         }
-      }
-    timer.expires = jiffies + msecs_to_jiffies(delay);
+    }
+    timer.expires = jiffies + msecs_to_jiffies(time);
     add_timer(&timer);
 }
 
@@ -225,19 +274,59 @@ static void temp_treatment(unsigned long d) {
         dreaming = false;
     }
 
+    int min;
+    min = 0;
+    if (d > buffer_threshold){
+	min = buffer_threshold;
+    }else{
+	min = d;
+    }
+    
     // desbloqueará a un proceso escritor si el hueco en la cola o bien es suficiente para
     // que el proceso pueda completar su petición, o bien es mayor o igual que el umbral recibido como parámetro
-    if(kfifo_is_empty(&fifo) || kfifo_avail(&fifo) >= minimum(buffer_threshold, d)) {
+    if(kfifo_is_empty(&fifo) || kfifo_avail(&fifo) >= min) {
 	printk(KERN_ALERT "Temp UNBLOCKING");
         wake_up_interruptible(&info.lista_bloq);
     }
 }
 
-unsigned int minimum(unsigned int threshold, unsigned int bytes_left)
+static long ejemplo_ioctl(struct file *filp, unsigned int cmd,
+                      unsigned long arg)
 {
-  if(threshold < bytes_left)
-    return threshold;
-  return bytes_left;
+  printk(KERN_ALERT "Funcion IOCTL llamada");
+  int* value;
+  int status;
+
+
+  printk(KERN_ALERT "IMPRIMIR CMD: %d",cmd);
+  printk(KERN_ALERT "ORW: %d", SPKR_SET_MUTE_STATE);
+  printk(KERN_ALERT "ORR: %d", SPKR_GET_MUTE_STATE);
+  
+  switch(cmd){
+    case SPKR_GET_MUTE_STATE:
+      printk(KERN_ALERT "Envio mute_state ioctl");
+      put_user(mute_sound, (int*)arg);
+      break;
+    case SPKR_SET_MUTE_STATE:
+      printk(KERN_ALERT "Set mute_state ioctl");
+      value = (int*)arg;
+      get_user(status, value);
+      if(status == 0){
+        mute_sound = 1;
+        spkr_off();
+      }else{
+        mute_sound = 0;
+        spkr_on();
+      }
+      break;
+    case SPKR_RESET:
+      printk(KERN_ALERT "Clear fifo");
+      spin_lock_bh(&lock);
+      kfifo_reset(&fifo);
+      spin_unlock_bh(&lock);
+      break;
+  }
+  return 0;
 }
 
 
