@@ -110,7 +110,7 @@ static ssize_t spkr_write(struct file *filp, const char __user *buf, size_t coun
         timer.data = count - count_copy;
 
         printk(KERN_ALERT "Blocked list");;
-        if(wait_event_interruptible(info.lista_bloq, kfifo_avail(&fifo) > 0) != 0){
+        if(wait_event_interruptible(info.lista_bloq, !kfifo_is_full(&fifo)) != 0){
             return -ERESTARTSYS;
         }
         printk(KERN_ALERT "Unblocked list");
