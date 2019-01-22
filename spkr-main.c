@@ -40,11 +40,6 @@ spinlock_t lock;
 bool dreaming;
 int mute;
 
-// Macros creacion de numero identificador ioctl
-#define SPKR_SET_MUTE_STATE _IOW('9',1,int*)
-#define SPKR_GET_MUTE_STATE _IOR('9',2,int*)
-#define SPKR_RESET _IO('9',3)
-
 // parameters
 module_param(minor, int, S_IRUGO);
 module_param(buffer_length, int, S_IRUGO);
@@ -123,7 +118,7 @@ static ssize_t spkr_write(struct file *filp, const char __user *buf, size_t coun
         if (kfifo_from_user(&fifo, buf+count_copy, count, &copied) != -EFAULT) {
             count_copy += copied;
 
-            if(!dreaming && (kfifo_len(&fifo) >= 4)){
+            if(!dreaming && (kfifo_len(&fifo) > 3)){
                 printk(KERN_ALERT "Playing by writting operation");
                 spkr_play();
             }
@@ -224,37 +219,38 @@ static int ejemplo_fsync(struct file *filp, int datasync){
 
 
 static void spkr_play(void) {
-    unsigned char sound_data[4];
-    unsigned int elements_copied;
-    unsigned int frequency;
-    unsigned int time;
+    char sound[4];
+    int elements_copied;
+    int frequency;
+    int time;
 
     dreaming = true;
     spin_lock_bh(&lock);
-    elements_copied = kfifo_out(&fifo, sound_data, 4);
+    elements_copied = kfifo_out(&fifo, sound, 4);
     if(elements_copied == 0){
         spin_unlock_bh(&lock);
-        return;
     }
-    spin_unlock_bh(&lock);
+    else{
+        spin_unlock_bh(&lock);
 
-    frequency = (unsigned int) ((sound_data[1] << 8) + sound_data[0]);
-    printk(KERN_ALERT "Frecuency: %d", frequency);
-    time = (unsigned int) ((sound_data[3] << 8) + sound_data[2]);
-    printk(KERN_ALERT "Time: %d", time);
+        frequency = (int) ((sound[1] << 8) + sound[0]);
+        printk(KERN_ALERT "Frecuency: %d", frequency);
+        time = (int) ((sound[3] << 8) + sound[2]);
+        printk(KERN_ALERT "Time: %d", time);
 
-    if(frequency == 0){
-        spkr_off();
-    } else {
-        spkr_set_frequency(frequency);
-        
-        // Solo reproducimos si no esta muteado
-        if(mute == 0){
-            spkr_on();
+        if(frequency == 0){
+            spkr_off();
+        } else {
+            spkr_set_frequency(frequency);
+            
+            // Solo reproducimos si no esta muteado
+            if(mute == 0){
+                spkr_on();
+            }
         }
+        timer.expires = jiffies + msecs_to_jiffies(time);
+        add_timer(&timer);
     }
-    timer.expires = jiffies + msecs_to_jiffies(time);
-    add_timer(&timer);
 }
 
 static void temp_treatment(unsigned long d) {
@@ -290,32 +286,30 @@ static long ejemplo_ioctl(struct file *filp, unsigned int cmd,
 {
     int *value;
     int local;
-        
-    switch(cmd){
-        
-        case SPKR_GET_MUTE_STATE:
-        
-            put_user(mute, (int*)arg);
+    int SPKR_SET_MUTE_STATE;
+    int SPKR_GET_MUTE_STATE;
+    int SPKR_RESET;
+    SPKR_SET_MUTE_STATE = _IOW('9',1,int*);
+    SPKR_GET_MUTE_STATE = _IOR('9',2,int*);
+    SPKR_RESET = _IO('9',3);
             
-            break;
-            
-        case SPKR_SET_MUTE_STATE:
-        
-            value = (int*)arg;
-            get_user(local, value/*&(int*)arg*/);
-            if(local == 0){
-                mute = 1;
-                spkr_off();
-            }else{
-                mute= 0;
-                spkr_on();
-            }
-            
-            break;
-            
-        case SPKR_RESET:
-          break;
-      }
+    if(cmd == SPKR_GET_MUTE_STATE){
+        put_user(mute, (int*)arg);
+        }
+        else if (cmd == SPKR_SET_MUTE_STATE){
+                value = (int*)arg;
+                get_user(local, value/*&(int*)arg*/);
+                if(local == 0){
+                    mute = 1;
+                    spkr_off();
+                }else{
+                    mute= 0;
+                    spkr_on();
+                }
+            } 
+            else if(cmd == SPKR_RESET)
+                kfifo_reset(&fifo);
+
   return 0;
 }
 
