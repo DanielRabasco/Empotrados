@@ -186,6 +186,8 @@ int speaker_init(void){
     if(buffer_threshold > buffer_length) {
 	buffer_threshold = buffer_length;
     }
+    
+    spin_lock_init(&lock);
         
     spkr_init();
     /*spkr_on();
@@ -220,21 +222,21 @@ static int ejemplo_fsync(struct file *filp, int datasync){
 
 static void spkr_play(void) {
     char sound[4];
-    int elements_copied;
+    int data;
     int frequency;
     int time;
-
     dreaming = true;
+    
+    // The ioctl operation could be reseting the fifo
     spin_lock_bh(&lock);
-    elements_copied = kfifo_out(&fifo, sound, 4);
-    if(elements_copied == 0){
-        spin_unlock_bh(&lock);
-    }
-    else{
-        spin_unlock_bh(&lock);
-
+    data = kfifo_out(&fifo, sound, 4);
+    spin_unlock_bh(&lock);
+    if(data != 0){
+        // los dos primeros bytes especifican la frecuencia
         frequency = (int) ((sound[1] << 8) + sound[0]);
         printk(KERN_ALERT "Frecuency: %d", frequency);
+        
+        // los dos bytes siguientes especifican la duracion
         time = (int) ((sound[3] << 8) + sound[2]);
         printk(KERN_ALERT "Time: %d", time);
 
@@ -248,6 +250,8 @@ static void spkr_play(void) {
                 spkr_on();
             }
         }
+        
+        // establecemos el tiempo del temporizador para cuando haya acabado el sonido
         timer.expires = jiffies + msecs_to_jiffies(time);
         add_timer(&timer);
     }
@@ -307,8 +311,12 @@ static long ejemplo_ioctl(struct file *filp, unsigned int cmd,
                     spkr_on();
                 }
             } 
-            else if(cmd == SPKR_RESET)
+            else if(cmd == SPKR_RESET){
+                // el vaciado no se produce hasta que se completa el procesado del sonido en curso
+                spin_lock_bh(&lock);
                 kfifo_reset(&fifo);
+                spin_unlock_bh(&lock);
+            }
 
   return 0;
 }
