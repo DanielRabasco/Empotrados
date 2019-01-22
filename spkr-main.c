@@ -222,11 +222,11 @@ static int ejemplo_fsync(struct file *filp, int datasync){
 
 static void spkr_play(void) {
     char sound[4];
-    int data;
     int frequency;
     int time;
     dreaming = true;
     
+    int data;
     // The ioctl operation could be reseting the fifo
     spin_lock_bh(&lock);
     data = kfifo_out(&fifo, sound, 4);
